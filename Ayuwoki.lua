@@ -243,10 +243,10 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
     -- create safety platform and teleport bot up
     local platform = createSafetyPlatform(120)
-    wait(0.2)
+    wait(0.2 * speedScale())
     local platformPos = platform.Position + Vector3.new(0, 3, 0)
     teleportTo(platformPos)
-    wait(0.5)
+    wait(0.5 * speedScale())
 
     -- If the target already has an Escoba, stay on the safety platform until they no longer have it
     if playerHasEscoba(targetPlayer) then
@@ -257,7 +257,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
                 end)
             end
-            wait(3)
+            wait(math.max(0.1, 3 * speedScale()))
         end
         if not botActive then
             return
@@ -281,18 +281,18 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
         -- teleport to the candidate, attempt pickup, then return to safety platform
         teleportTo(primary.Position + Vector3.new(0, 3, 0))
-        wait(0.2)
+        wait(0.2 * speedScale())
         local prompt = getProximityPromptFromModel(model)
         if prompt then
             triggerPrompt(prompt)
-            wait(0.3)
+            wait(0.3 * speedScale())
             local tool = waitForToolAcquired(4)
             if tool then
                 foundTool = tool
                 break
             end
         else
-            wait(0.2)
+            wait(0.2 * speedScale())
             local tool = waitForToolAcquired(3)
             if tool then
                 foundTool = tool
@@ -305,7 +305,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             pcall(function()
                 teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
             end)
-            wait(0.4)
+            wait(0.4 * speedScale())
         end
         -- avoid rapid searching
         local sd = (type(searchDelay) == "number" and searchDelay) or tonumber(searchDelay) or 2
@@ -386,7 +386,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     botActive = false
                     return
                 end
-                wait(0.5)
+                    wait(0.5 * speedScale())
             end
             -- if timeout, still return to platform
             if safetyPlatform and safetyPlatform.Parent then
@@ -431,24 +431,25 @@ Tabs.Main:AddToggle("AutoAssist", { Title = "Auto-Assist When Whitelisted", Defa
     Options.AutoAssist.Value = not not Options.AutoAssist.Value
 end)
 
--- Search speed slider
-local SearchSlider = Tabs.Main:AddSlider("SearchSpeed", {
-    Title = "Search Delay",
-    Description = "Seconds between search attempts (lower = faster)",
-    Default = searchDelay,
-    Min = 0.5,
-    Max = 6,
-    Rounding = 0.5,
+-- Search delay input (numeric)
+local SearchInput = Tabs.Main:AddInput("SearchDelayInput", {
+    Title = "Search Delay (seconds)",
+    Description = "Seconds between search attempts (lower = faster). Use decimals like 0.5",
+    Default = tostring(searchDelay),
     Callback = function(Value)
-        searchDelay = tonumber(Value) or searchDelay
+        local n = tonumber(Value)
+        if n and n > 0 then
+            searchDelay = n
+        else
+            notifyLocal("Assist", "Invalid search delay value. Keeping: " .. tostring(searchDelay), 4)
+        end
     end
 })
 
-SearchSlider:OnChanged(function(Value)
-    searchDelay = tonumber(Value) or searchDelay
-end)
-
-SearchSlider:SetValue(searchDelay)
+local function speedScale()
+    local sd = tonumber(searchDelay) or 2
+    return math.max(0.05, sd) / 2
+end
 
 -- Auto-Respawn indicator (always enabled) and monitor
 Tabs.Main:AddToggle("AutoRespawn", { Title = "Auto-Respawn", Description = "Automatically press respawn when DeadFrame appears", Default = true, Disabled = true }):OnChanged(function() end)
@@ -456,20 +457,37 @@ Tabs.Main:AddToggle("AutoRespawn", { Title = "Auto-Respawn", Description = "Auto
 local function pressDeadFrameButton(deadFrame)
     if not deadFrame then return end
     local btn = nil
-    for _,v in pairs(deadFrame:GetDescendants()) do
-        if v:IsA("TextButton") and v.Parent and v.Parent.Name == "DeadFrame" then
-            btn = v
-            break
+    -- Prefer explicit Respawn button under Main.DeadFrame if present
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        local mainGui = pg:FindFirstChild("Main")
+        if mainGui then
+            local df = mainGui:FindFirstChild("DeadFrame")
+            if df then
+                local r = df:FindFirstChild("Respawn")
+                if r and r:IsA("TextButton") then
+                    btn = r
+                end
+            end
+        end
+    end
+    -- fallback: any TextButton descendant named like 'respawn'
+    if not btn then
+        for _,v in pairs(deadFrame:GetDescendants()) do
+            if v:IsA("TextButton") and (v.Name == "Respawn" or v.Name:lower():find("respawn")) then
+                btn = v
+                break
+            end
         end
     end
     if not btn then return end
-    if not btn:FindFirstChild("SelectionImageObject") then return end
+    -- Try activation methods; mobile executors usually respond to :Activate()
+    pcall(function() if btn.Activate then btn:Activate() end end)
     pcall(function()
         if btn.MouseButton1Click and btn.MouseButton1Click.Fire then
             btn.MouseButton1Click:Fire()
         end
     end)
-    pcall(function() if btn.Activate then btn:Activate() end end)
     notifyLocal("Auto-Respawn", "Respawn button pressed.", 4)
 end
 
