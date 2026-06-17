@@ -32,6 +32,7 @@ local followCoroutine = nil
 local handToFired = false
 local toolEquipped = false
 local searchDelay = 2 -- seconds between search attempts to avoid rapid searching
+local autoAssistEnabled = true -- local flag to control auto-assist when whitelisted
 
 -- Helpers
 local function findPlayerByText(text)
@@ -427,8 +428,8 @@ Tabs.Main:AddButton({
     end
 })
 
-Tabs.Main:AddToggle("AutoAssist", { Title = "Auto-Assist When Whitelisted", Default = true }):OnChanged(function()
-    Options.AutoAssist.Value = not not Options.AutoAssist.Value
+Tabs.Main:AddToggle("AutoAssist", { Title = "Auto-Assist When Whitelisted", Default = true }):OnChanged(function(val)
+    autoAssistEnabled = not not val
 end)
 
 -- Search delay input (numeric)
@@ -583,7 +584,7 @@ Tabs.Main:AddButton({
 -- Auto-run when whitelisted player appears (if enabled)
 spawn(function()
     while true do
-        if whitelistedPlayer and Options.AutoAssist and Options.AutoAssist.Value and not botActive then
+        if whitelistedPlayer and autoAssistEnabled and not botActive then
             if whitelistedPlayer.Character and whitelistedPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 spawn(function()
                     acquireEscobaAndDeliverTo(whitelistedPlayer)
