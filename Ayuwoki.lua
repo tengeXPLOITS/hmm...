@@ -30,6 +30,9 @@ local botActive = false
 local safetyPlatform = nil
 local followCoroutine = nil
 local handToFired = false
+local handToActive = false
+local handToCoroutine = nil
+local searchDelay = 4 -- seconds between search attempts to avoid rapid searching
 
 -- Helpers
 local function findPlayerByText(text)
@@ -216,6 +219,23 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
     teleportTo(platformPos)
     wait(0.5)
 
+    -- If the target already has an Escoba, stay on the safety platform until they no longer have it
+    if playerHasEscoba(targetPlayer) then
+        notifyLocal("Assist", "Target already has Escoba. Waiting on safety platform...", 6)
+        while playerHasEscoba(targetPlayer) and botActive do
+            if safetyPlatform and safetyPlatform.Parent then
+                pcall(function()
+                    teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
+                end)
+            end
+            wait(3)
+        end
+        if not botActive then
+            return
+        end
+        notifyLocal("Assist", "Target lost Escoba. Resuming assistance.", 4)
+    end
+
     -- find candidates
     local candidates = findEscobaCandidates()
     if #candidates == 0 then
@@ -251,13 +271,16 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             end
         end
 
-        -- go back to safety platform between attempts
+        -- go back to safety platform between attempts to avoid being seen and add a delay
         if safetyPlatform and safetyPlatform.Parent then
             pcall(function()
                 teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
             end)
             wait(0.4)
         end
+        -- avoid rapid searching
+        local sd = tonumber(searchDelay) or 4
+        wait(sd)
     end
 
     if not foundTool then
@@ -284,11 +307,29 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             sendChatMessage("[Assist] " .. targetPlayer.Name .. ": assistance mode enabled. A BOT will help you.")
         end)
 
-        -- fire server HandTo event if exists; ensure only once
+        -- fire server HandTo event repeatedly every 70s until the player has the tool or assistance stops
         pcall(function()
-            if not handToFired and ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("HandTo") then
-                ReplicatedStorage.Events.HandTo:FireServer()
-                handToFired = true
+            if ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("HandTo") then
+                handToActive = true
+                if handToCoroutine and coroutine.status(handToCoroutine) ~= "dead" then
+                    -- already running
+                else
+                    handToCoroutine = coroutine.create(function()
+                        while handToActive and botActive and not playerHasEscoba(targetPlayer) do
+                            pcall(function()
+                                ReplicatedStorage.Events.HandTo:FireServer()
+                            end)
+                            -- wait 70 seconds before next attempt
+                            local waited = 0
+                            while waited < 70 and handToActive and botActive and not playerHasEscoba(targetPlayer) do
+                                wait(1)
+                                waited = waited + 1
+                            end
+                        end
+                        handToActive = false
+                    end)
+                    coroutine.resume(handToCoroutine)
+                end
             end
         end)
 
@@ -381,6 +422,8 @@ Tabs.Main:AddButton({
     Description = "Stop any active assistance routine",
     Callback = function()
         botActive = false
+        handToActive = false
+        handToCoroutine = nil
         if followCoroutine and coroutine.status(followCoroutine) ~= "dead" then
             -- coroutine will stop due to botActive = false
         end
