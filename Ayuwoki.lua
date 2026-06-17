@@ -30,9 +30,8 @@ local botActive = false
 local safetyPlatform = nil
 local followCoroutine = nil
 local handToFired = false
-local handToActive = false
-local handToCoroutine = nil
-local searchDelay = 4 -- seconds between search attempts to avoid rapid searching
+local toolEquipped = false
+local searchDelay = 2 -- seconds between search attempts to avoid rapid searching
 
 -- Helpers
 local function findPlayerByText(text)
@@ -84,6 +83,15 @@ local function teleportTo(pos)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     pcall(function() hrp.CFrame = CFrame.new(pos) end)
+    return true
+end
+
+local function teleportToCFrame(cframe)
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    pcall(function() hrp.CFrame = cframe end)
     return true
 end
 
@@ -218,20 +226,19 @@ local function followPlayerContinuously(targetPlayer)
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return end
     while botActive and targetPlayer and targetPlayer.Character and targetHRP.Parent do
-        if not botHasEscoba() then
-            -- stop following if bot doesn't have Escoba
-            break
-        end
+        if not botHasEscoba() then break end
         pcall(function()
-            local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 1.5 + Vector3.new(0, 0, 0)
-            hrp.CFrame = CFrame.lookAt(frontPos, targetHRP.Position)
+            local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2 + Vector3.new(0, 1.5, 0)
+            hrp.CFrame = CFrame.lookAt(frontPos, targetHRP.Position + Vector3.new(0, 1.5, 0))
         end)
-        wait(0.5)
+        wait(0.4)
     end
 end
 
 local function acquireEscobaAndDeliverTo(targetPlayer)
     botActive = true
+    handToFired = false
+    toolEquipped = false
     notifyLocal("Assist", "Starting assistance procedure...", 5)
 
     -- create safety platform and teleport bot up
@@ -315,29 +322,36 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
     if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
         local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
         if targetHRP then
-            local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2 + Vector3.new(0, 3, 0)
-            teleportTo(frontPos)
-            wait(0.2)
+                local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2
+                local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
+                local cframe = CFrame.new(frontPos + Vector3.new(0, 1.5, 0), lookAt)
+                teleportToCFrame(cframe)
+                wait(0.2)
 
-            -- equip the tool if possible so the bot is ready to hand it over
-            pcall(function()
-                equipTool(foundTool)
-            end)
-
-            -- ensure bot actually has Escoba before following
-            if not botHasEscoba() then
-                notifyLocal("Assist", "Couldn't equip Escoba. Returning to safety platform.", 5)
-                if safetyPlatform and safetyPlatform.Parent then
+                -- equip the tool once so the bot is ready to hand it over
+                if not toolEquipped then
                     pcall(function()
-                        teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
+                        equipTool(foundTool)
                     end)
+                    if botHasEscoba() then
+                        toolEquipped = true
+                    end
                 end
-                botActive = false
-                return
-            end
 
-            followCoroutine = coroutine.create(function() followPlayerContinuously(targetPlayer) end)
-            coroutine.resume(followCoroutine)
+                -- ensure bot actually has Escoba before following
+                if not botHasEscoba() then
+                    notifyLocal("Assist", "Couldn't equip Escoba. Returning to safety platform.", 5)
+                    if safetyPlatform and safetyPlatform.Parent then
+                        pcall(function()
+                            teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
+                        end)
+                    end
+                    botActive = false
+                    return
+                end
+
+                followCoroutine = coroutine.create(function() followPlayerContinuously(targetPlayer) end)
+                coroutine.resume(followCoroutine)
         end
 
         -- Try to notify target via chat
@@ -345,28 +359,12 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             sendChatMessage("[Assist] " .. targetPlayer.Name .. ": assistance mode enabled. A BOT will help you.")
         end)
 
-        -- fire server HandTo event repeatedly every 70s until the player has the tool or assistance stops
+        -- fire server HandTo event once when bot is ready and player doesn't already have Escoba
         pcall(function()
-            if ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("HandTo") then
-                handToActive = true
-                if handToCoroutine and coroutine.status(handToCoroutine) ~= "dead" then
-                    -- already running
-                else
-                    handToCoroutine = coroutine.create(function()
-                        while handToActive and botActive and not playerHasEscoba(targetPlayer) do
-                            pcall(function()
-                                ReplicatedStorage.Events.HandTo:FireServer()
-                            end)
-                            -- wait 70 seconds before next attempt
-                            local waited = 0
-                            while waited < 70 and handToActive and botActive and not playerHasEscoba(targetPlayer) do
-                                wait(1)
-                                waited = waited + 1
-                            end
-                        end
-                        handToActive = false
-                    end)
-                    coroutine.resume(handToCoroutine)
+            if not handToFired and ReplicatedStorage:FindFirstChild("Events") and ReplicatedStorage.Events:FindFirstChild("HandTo") then
+                if botHasEscoba() and not playerHasEscoba(targetPlayer) then
+                    ReplicatedStorage.Events.HandTo:FireServer()
+                    handToFired = true
                 end
             end
         end)
@@ -460,8 +458,8 @@ Tabs.Main:AddButton({
     Description = "Stop any active assistance routine",
     Callback = function()
         botActive = false
-        handToActive = false
-        handToCoroutine = nil
+        handToFired = false
+        toolEquipped = false
         if followCoroutine and coroutine.status(followCoroutine) ~= "dead" then
             -- coroutine will stop due to botActive = false
         end
