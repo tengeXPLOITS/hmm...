@@ -431,6 +431,25 @@ Tabs.Main:AddToggle("AutoAssist", { Title = "Auto-Assist When Whitelisted", Defa
     Options.AutoAssist.Value = not not Options.AutoAssist.Value
 end)
 
+-- Search speed slider
+local SearchSlider = Tabs.Main:AddSlider("SearchSpeed", {
+    Title = "Search Delay",
+    Description = "Seconds between search attempts (lower = faster)",
+    Default = searchDelay,
+    Min = 0.5,
+    Max = 6,
+    Rounding = 0.5,
+    Callback = function(Value)
+        searchDelay = Value
+    end
+})
+
+SearchSlider:OnChanged(function(Value)
+    searchDelay = Value
+end)
+
+SearchSlider:SetValue(searchDelay)
+
 Tabs.Main:AddButton({
     Title = "Start Assistance Now",
     Description = "Immediately run the assistance routine for the whitelisted player",
