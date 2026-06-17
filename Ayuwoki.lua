@@ -33,6 +33,14 @@ local handToFired = false
 local toolEquipped = false
 local searchDelay = 2 -- seconds between search attempts to avoid rapid searching
 
+local _baseSearchDelay = 2
+local function scaleFactor()
+    local sd = tonumber(searchDelay) or _baseSearchDelay
+    local s = sd / _baseSearchDelay
+    if s < 0.01 then s = 0.01 end
+    return s
+end
+
 -- Helpers
 local function findPlayerByText(text)
     if not text or text == "" then return nil end
@@ -231,7 +239,7 @@ local function followPlayerContinuously(targetPlayer)
             local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2 + Vector3.new(0, 1.5, 0)
             hrp.CFrame = CFrame.lookAt(frontPos, targetHRP.Position + Vector3.new(0, 1.5, 0))
         end)
-        wait(0.4)
+        wait(0.4 * scaleFactor())
     end
 end
 
@@ -243,10 +251,10 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
     -- create safety platform and teleport bot up
     local platform = createSafetyPlatform(120)
-    wait(0.2)
+    wait(0.2 * scaleFactor())
     local platformPos = platform.Position + Vector3.new(0, 3, 0)
     teleportTo(platformPos)
-    wait(0.5)
+    wait(0.5 * scaleFactor())
 
     -- If the target already has an Escoba, stay on the safety platform until they no longer have it
     if playerHasEscoba(targetPlayer) then
@@ -257,7 +265,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
                 end)
             end
-            wait(3)
+            wait(math.max(0.05, 3 * scaleFactor()))
         end
         if not botActive then
             return
@@ -281,18 +289,18 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
         -- teleport to the candidate, attempt pickup, then return to safety platform
         teleportTo(primary.Position + Vector3.new(0, 3, 0))
-        wait(0.2)
+        wait(0.2 * scaleFactor())
         local prompt = getProximityPromptFromModel(model)
         if prompt then
             triggerPrompt(prompt)
-            wait(0.3)
+            wait(0.3 * scaleFactor())
             local tool = waitForToolAcquired(4)
             if tool then
                 foundTool = tool
                 break
             end
         else
-            wait(0.2)
+            wait(0.2 * scaleFactor())
             local tool = waitForToolAcquired(3)
             if tool then
                 foundTool = tool
@@ -305,7 +313,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             pcall(function()
                 teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
             end)
-            wait(0.4)
+            wait(0.4 * scaleFactor())
         end
         -- avoid rapid searching
         local sd = (type(searchDelay) == "number" and searchDelay) or tonumber(searchDelay) or 2
@@ -326,7 +334,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                 local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
                 local cframe = CFrame.new(frontPos + Vector3.new(0, 1.5, 0), lookAt)
                 teleportToCFrame(cframe)
-                wait(0.2)
+                wait(0.2 * scaleFactor())
 
                 -- equip the tool once so the bot is ready to hand it over
                 if not toolEquipped then
@@ -375,7 +383,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
         spawn(function()
             local t0 = tick()
             local timeout = 10
-            while tick() - t0 < timeout do
+                while tick() - t0 < timeout do
                 if playerHasEscoba(targetPlayer) then
                     -- teleport back to safety platform and stop following
                     if safetyPlatform and safetyPlatform.Parent then
@@ -386,7 +394,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     botActive = false
                     return
                 end
-                wait(0.5)
+                wait(0.5 * scaleFactor())
             end
             -- if timeout, still return to platform
             if safetyPlatform and safetyPlatform.Parent then
@@ -455,21 +463,41 @@ Tabs.Main:AddToggle("AutoRespawn", { Title = "Auto-Respawn", Description = "Auto
 
 local function pressDeadFrameButton(deadFrame)
     if not deadFrame then return end
+    -- First, try the exact StarterGui path the user provided
+    pcall(function()
+        local starter = game:GetService("StarterGui")
+        if starter then
+            local main = starter:FindFirstChild("Main")
+            if main then
+                local df = main:FindFirstChild("DeadFrame")
+                if df then
+                    local resp = df:FindFirstChild("Respawn")
+                    if resp and resp:IsA("TextButton") then
+                        pcall(function() if resp.Activate then resp:Activate() end end)
+                        pcall(function() if resp.MouseButton1Click and resp.MouseButton1Click.Fire then resp.MouseButton1Click:Fire() end end)
+                        notifyLocal("Auto-Respawn", "Respawn (StarterGui) pressed.", 4)
+                        return
+                    end
+                end
+            end
+        end
+    end)
+
+    -- Fallback: try to find any TextButton descendant under the provided deadFrame
     local btn = nil
     for _,v in pairs(deadFrame:GetDescendants()) do
-        if v:IsA("TextButton") and v.Parent and v.Parent.Name == "DeadFrame" then
+        if v:IsA("TextButton") and (v.Name == "Respawn" or v.Name:lower():find("respawn")) then
             btn = v
             break
         end
     end
     if not btn then return end
-    if not btn:FindFirstChild("SelectionImageObject") then return end
+    pcall(function() if btn.Activate then btn:Activate() end end)
     pcall(function()
         if btn.MouseButton1Click and btn.MouseButton1Click.Fire then
             btn.MouseButton1Click:Fire()
         end
     end)
-    pcall(function() if btn.Activate then btn:Activate() end end)
     notifyLocal("Auto-Respawn", "Respawn button pressed.", 4)
 end
 
@@ -521,6 +549,33 @@ local function monitorDeadFrameAndPress()
 end
 
 spawn(monitorDeadFrameAndPress)
+
+-- Monitor workspace for any Model named "Ayuwoki" and move bot to safety platform if too close
+spawn(function()
+    while true do
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            for _,m in pairs(workspace:GetDescendants()) do
+                if m:IsA("Model") and m.Name == "Ayuwoki" and m.Parent == workspace then
+                    local part = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+                    if part and (hrp.Position - part.Position).Magnitude < 15 then
+                        if not safetyPlatform or not safetyPlatform.Parent then
+                            createSafetyPlatform(120)
+                        end
+                        pcall(function()
+                            teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
+                        end)
+                        botActive = false
+                        notifyLocal("Assist", "Ayuwoki nearby — returning to safety platform.", 4)
+                        break
+                    end
+                end
+            end
+        end
+        wait(0.25)
+    end
+end)
 
 Tabs.Main:AddButton({
     Title = "Start Assistance Now",
