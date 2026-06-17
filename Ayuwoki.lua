@@ -308,7 +308,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             wait(0.4)
         end
         -- avoid rapid searching
-        local sd = tonumber(searchDelay) or 4
+        local sd = (type(searchDelay) == "number" and searchDelay) or tonumber(searchDelay) or 2
         wait(sd)
     end
 
@@ -440,12 +440,12 @@ local SearchSlider = Tabs.Main:AddSlider("SearchSpeed", {
     Max = 6,
     Rounding = 0.5,
     Callback = function(Value)
-        searchDelay = Value
+        searchDelay = tonumber(Value) or searchDelay
     end
 })
 
 SearchSlider:OnChanged(function(Value)
-    searchDelay = Value
+    searchDelay = tonumber(Value) or searchDelay
 end)
 
 SearchSlider:SetValue(searchDelay)
