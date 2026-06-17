@@ -450,6 +450,78 @@ end)
 
 SearchSlider:SetValue(searchDelay)
 
+-- Auto-Respawn indicator (always enabled) and monitor
+Tabs.Main:AddToggle("AutoRespawn", { Title = "Auto-Respawn", Description = "Automatically press respawn when DeadFrame appears", Default = true, Disabled = true }):OnChanged(function() end)
+
+local function pressDeadFrameButton(deadFrame)
+    if not deadFrame then return end
+    local btn = nil
+    for _,v in pairs(deadFrame:GetDescendants()) do
+        if v:IsA("TextButton") and v.Parent and v.Parent.Name == "DeadFrame" then
+            btn = v
+            break
+        end
+    end
+    if not btn then return end
+    if not btn:FindFirstChild("SelectionImageObject") then return end
+    pcall(function()
+        if btn.MouseButton1Click and btn.MouseButton1Click.Fire then
+            btn.MouseButton1Click:Fire()
+        end
+    end)
+    pcall(function() if btn.Activate then btn:Activate() end end)
+    notifyLocal("Auto-Respawn", "Respawn button pressed.", 4)
+end
+
+local function monitorDeadFrameAndPress()
+    local pg = LocalPlayer:WaitForChild("PlayerGui")
+    -- check existing DeadFrame(s)
+    for _,d in pairs(pg:GetDescendants()) do
+        if d.Name == "DeadFrame" and d:IsA("Frame") then
+            -- if player already dead, press immediately
+            local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+            if humanoid and humanoid.Health <= 0 then
+                pcall(function() pressDeadFrameButton(d) end)
+            end
+        end
+    end
+
+    -- Listen for DeadFrame added anywhere under PlayerGui
+    pg.DescendantAdded:Connect(function(desc)
+        if not desc then return end
+        local df = nil
+        if desc.Name == "DeadFrame" and desc:IsA("Frame") then
+            df = desc
+        elseif desc.Parent and desc.Parent.Name == "DeadFrame" then
+            df = desc.Parent
+        end
+        if not df then return end
+        -- If we're already dead, press now; otherwise press when humanoid dies
+        local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+        if humanoid and humanoid.Health <= 0 then
+            pcall(function() pressDeadFrameButton(df) end)
+        elseif humanoid then
+            humanoid.Died:Connect(function()
+                wait(0.05)
+                pcall(function() pressDeadFrameButton(df) end)
+            end)
+        else
+            -- wait for character/humanoid then press on death
+            LocalPlayer.CharacterAdded:Connect(function(char)
+                local hd = char:WaitForChild("Humanoid", 5)
+                if hd then
+                    hd.Died:Connect(function()
+                        wait(0.05)
+                        pcall(function() pressDeadFrameButton(df) end)
+                    end)
+                end
+            end)
+        end
+    end)
+end
+
+spawn(monitorDeadFrameAndPress)
+
 Tabs.Main:AddButton({
     Title = "Start Assistance Now",
     Description = "Immediately run the assistance routine for the whitelisted player",
