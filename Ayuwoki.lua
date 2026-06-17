@@ -126,6 +126,23 @@ local function playerHasEscoba(pl)
     return false
 end
 
+local function botHasEscoba()
+    local char = LocalPlayer.Character
+    if char then
+        for _,o in pairs(char:GetChildren()) do
+            if o:IsA("Tool") and o.Name:lower():find("escoba") then
+                return true
+            end
+        end
+    end
+    for _,o in pairs(LocalPlayer.Backpack:GetChildren()) do
+        if o:IsA("Tool") and o.Name:lower():find("escoba") then
+            return true
+        end
+    end
+    return false
+end
+
 local function findEscobaCandidates()
     local candidates = {}
     for _,inst in pairs(workspace:GetDescendants()) do
@@ -201,8 +218,13 @@ local function followPlayerContinuously(targetPlayer)
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return end
     while botActive and targetPlayer and targetPlayer.Character and targetHRP.Parent do
+        if not botHasEscoba() then
+            -- stop following if bot doesn't have Escoba
+            break
+        end
         pcall(function()
-            hrp.CFrame = targetHRP.CFrame * CFrame.new(1.5, 0, 0)
+            local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 1.5 + Vector3.new(0, 0, 0)
+            hrp.CFrame = CFrame.lookAt(frontPos, targetHRP.Position)
         end)
         wait(0.5)
     end
@@ -291,16 +313,32 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
     -- teleport back to target and follow
     if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        teleportTo(targetPlayer.Character.HumanoidRootPart.Position + Vector3.new(0, 3, 0))
-        wait(0.2)
+        local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if targetHRP then
+            local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2 + Vector3.new(0, 3, 0)
+            teleportTo(frontPos)
+            wait(0.2)
 
-        -- equip the tool if possible so the bot is ready to hand it over
-        pcall(function()
-            equipTool(foundTool)
-        end)
+            -- equip the tool if possible so the bot is ready to hand it over
+            pcall(function()
+                equipTool(foundTool)
+            end)
 
-        followCoroutine = coroutine.create(function() followPlayerContinuously(targetPlayer) end)
-        coroutine.resume(followCoroutine)
+            -- ensure bot actually has Escoba before following
+            if not botHasEscoba() then
+                notifyLocal("Assist", "Couldn't equip Escoba. Returning to safety platform.", 5)
+                if safetyPlatform and safetyPlatform.Parent then
+                    pcall(function()
+                        teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
+                    end)
+                end
+                botActive = false
+                return
+            end
+
+            followCoroutine = coroutine.create(function() followPlayerContinuously(targetPlayer) end)
+            coroutine.resume(followCoroutine)
+        end
 
         -- Try to notify target via chat
         pcall(function()
