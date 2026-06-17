@@ -32,14 +32,6 @@ local followCoroutine = nil
 local handToFired = false
 local toolEquipped = false
 local searchDelay = 2 -- seconds between search attempts to avoid rapid searching
-local _baseSearchDelay = 2
-
-local function scaleFactor()
-    local sd = tonumber(searchDelay) or _baseSearchDelay
-    local s = sd / _baseSearchDelay
-    if s < 0.01 then s = 0.01 end
-    return s
-end
 
 -- Helpers
 local function findPlayerByText(text)
@@ -239,7 +231,7 @@ local function followPlayerContinuously(targetPlayer)
             local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2 + Vector3.new(0, 1.5, 0)
             hrp.CFrame = CFrame.lookAt(frontPos, targetHRP.Position + Vector3.new(0, 1.5, 0))
         end)
-        wait(0.4 * scaleFactor())
+        wait(0.4)
     end
 end
 
@@ -251,10 +243,10 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
     -- create safety platform and teleport bot up
     local platform = createSafetyPlatform(120)
-    wait(0.2 * scaleFactor())
+    wait(0.2)
     local platformPos = platform.Position + Vector3.new(0, 3, 0)
     teleportTo(platformPos)
-    wait(0.5 * scaleFactor())
+    wait(0.5)
 
     -- If the target already has an Escoba, stay on the safety platform until they no longer have it
     if playerHasEscoba(targetPlayer) then
@@ -265,7 +257,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
                 end)
             end
-            wait(math.max(0.05, 3 * scaleFactor()))
+            wait(3)
         end
         if not botActive then
             return
@@ -289,18 +281,18 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
 
         -- teleport to the candidate, attempt pickup, then return to safety platform
         teleportTo(primary.Position + Vector3.new(0, 3, 0))
-        wait(0.2 * scaleFactor())
+        wait(0.2)
         local prompt = getProximityPromptFromModel(model)
         if prompt then
             triggerPrompt(prompt)
-            wait(0.3 * scaleFactor())
+            wait(0.3)
             local tool = waitForToolAcquired(4)
             if tool then
                 foundTool = tool
                 break
             end
         else
-            wait(0.2 * scaleFactor())
+            wait(0.2)
             local tool = waitForToolAcquired(3)
             if tool then
                 foundTool = tool
@@ -313,7 +305,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             pcall(function()
                 teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
             end)
-            wait(0.4 * scaleFactor())
+            wait(0.4)
         end
         -- avoid rapid searching
         local sd = (type(searchDelay) == "number" and searchDelay) or tonumber(searchDelay) or 2
@@ -334,7 +326,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                 local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
                 local cframe = CFrame.new(frontPos + Vector3.new(0, 1.5, 0), lookAt)
                 teleportToCFrame(cframe)
-                wait(0.2 * scaleFactor())
+                wait(0.2)
 
                 -- equip the tool once so the bot is ready to hand it over
                 if not toolEquipped then
@@ -383,7 +375,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
         spawn(function()
             local t0 = tick()
             local timeout = 10
-                while tick() - t0 < timeout do
+            while tick() - t0 < timeout do
                 if playerHasEscoba(targetPlayer) then
                     -- teleport back to safety platform and stop following
                     if safetyPlatform and safetyPlatform.Parent then
@@ -394,7 +386,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     botActive = false
                     return
                 end
-                wait(0.5 * scaleFactor())
+                wait(0.5)
             end
             -- if timeout, still return to platform
             if safetyPlatform and safetyPlatform.Parent then
