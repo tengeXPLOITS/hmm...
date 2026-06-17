@@ -186,55 +186,23 @@ end
 
 local function triggerPrompt(prompt)
     if not prompt then return false end
-    local success = false
-    pcall(function()
-        -- try to move closer to the prompt's nearest BasePart so triggering is reliable
-        local triggerPart = prompt.Parent
-        while triggerPart and not triggerPart:IsA("BasePart") do
-            triggerPart = triggerPart.Parent
-        end
-        if triggerPart and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            pcall(function()
-                teleportTo(triggerPart.Position + Vector3.new(0, 3, 0))
-            end)
-            wait(0.05 * scaleFactor())
-        end
-
-        -- preferred global helpers
+    local ok, _ = pcall(function()
         if fireproximityprompt then
             fireproximityprompt(prompt)
-            success = true
             return
         end
         if _G and _G.fireproximityprompt then
             _G.fireproximityprompt(prompt)
-            success = true
             return
         end
-
-        -- Input hold (respect HoldDuration when present)
-        if prompt.InputHoldBegin and prompt.InputHoldEnd then
-            local dur = (prompt.HoldDuration and tonumber(prompt.HoldDuration)) or 0.2
+        if prompt.InputHoldBegin then
             prompt:InputHoldBegin()
-            wait(math.max(0.05, dur * scaleFactor()))
+            wait(0.1)
             prompt:InputHoldEnd()
-            success = true
-            return
-        end
-
-        -- try other common trigger methods
-        if prompt.Trigger then
-            pcall(function() prompt:Trigger() end)
-            success = true
-            return
-        end
-        if prompt.Fire then
-            pcall(function() prompt:Fire() end)
-            success = true
             return
         end
     end)
-    return success
+    return ok
 end
 
 local function waitForToolAcquired(timeout)
@@ -591,7 +559,7 @@ spawn(function()
             for _,m in pairs(workspace:GetDescendants()) do
                 if m:IsA("Model") and m.Name == "Ayuwoki" and m.Parent == workspace then
                     local part = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
-                    if part and (hrp.Position - part.Position).Magnitude < 6 then
+                    if part and (hrp.Position - part.Position).Magnitude < 15 then
                         if not safetyPlatform or not safetyPlatform.Parent then
                             createSafetyPlatform(120)
                         end
