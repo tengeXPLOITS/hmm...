@@ -32,6 +32,7 @@ local followCoroutine = nil
 local handToFired = false
 local toolEquipped = false
 local searchDelay = 2 -- seconds between search attempts to avoid rapid searching
+local standPosition = "front" -- front/back/left/right
 
 local _baseSearchDelay = 2
 local function scaleFactor()
@@ -186,23 +187,76 @@ end
 
 local function triggerPrompt(prompt)
     if not prompt then return false end
-    local ok, _ = pcall(function()
+    local success = false
+    pcall(function()
+        -- try known global helper first
         if fireproximityprompt then
-            fireproximityprompt(prompt)
+            pcall(function() fireproximityprompt(prompt) end)
+            success = true
             return
         end
         if _G and _G.fireproximityprompt then
-            _G.fireproximityprompt(prompt)
+            pcall(function() _G.fireproximityprompt(prompt) end)
+            success = true
             return
         end
-        if prompt.InputHoldBegin then
-            prompt:InputHoldBegin()
-            wait(0.1)
-            prompt:InputHoldEnd()
-            return
+        -- teleport closer to the prompt's base part if available to improve reliability
+        local basePart = prompt.Parent and prompt.Parent:IsA("BasePart") and prompt.Parent or (prompt.Parent and prompt.Parent.PrimaryPart)
+        if basePart and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = LocalPlayer.Character.HumanoidRootPart
+            local targetPos = basePart.Position + basePart.CFrame.LookVector * 0.5 + Vector3.new(0, 1.2, 0)
+            pcall(function() hrp.CFrame = CFrame.new(targetPos, basePart.Position) end)
+            wait(0.15) -- small stabilization after teleport
+        end
+
+        -- mobile/executor-specific attempts: try touch-based triggering first on touch devices
+        local UserInputService = game:GetService("UserInputService")
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if UserInputService and UserInputService.TouchEnabled and basePart and hrp then
+            -- try common exploit touch emulator: firetouchinterest
+            if firetouchinterest or (_G and _G.firetouchinterest) then
+                for i = 1, 3 do
+                    pcall(function()
+                        if firetouchinterest then
+                            firetouchinterest(basePart, hrp, 0)
+                        else
+                            _G.firetouchinterest(basePart, hrp, 0)
+                        end
+                    end)
+                    wait(0.06)
+                    pcall(function()
+                        if firetouchinterest then
+                            firetouchinterest(basePart, hrp, 1)
+                        else
+                            _G.firetouchinterest(basePart, hrp, 1)
+                        end
+                    end)
+                    wait(0.09)
+                end
+                success = true
+                return
+            end
+        end
+
+        -- attempt several trigger methods with short, non-scaled pauses for reliability
+        for i = 1, 4 do
+            if prompt.InputHoldBegin and prompt.InputHoldEnd then
+                pcall(function()
+                    prompt:InputHoldBegin()
+                end)
+                wait(math.max(0.07, (prompt.HoldDuration or 0.1)))
+                pcall(function()
+                    prompt:InputHoldEnd()
+                end)
+            end
+            pcall(function() if prompt.Trigger then prompt:Trigger() end end)
+            pcall(function() if prompt.Fire then prompt:Fire() end end)
+            wait(0.08)
+            -- check if tool acquired in outer code; we return true as we attempted
+            success = true
         end
     end)
-    return ok
+    return success
 end
 
 local function waitForToolAcquired(timeout)
@@ -236,10 +290,29 @@ local function followPlayerContinuously(targetPlayer)
     while botActive and targetPlayer and targetPlayer.Character and targetHRP.Parent do
         if not botHasEscoba() then break end
         pcall(function()
-            local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2 + Vector3.new(0, 1.5, 0)
-            hrp.CFrame = CFrame.lookAt(frontPos, targetHRP.Position + Vector3.new(0, 1.5, 0))
+            local offset = Vector3.new(0,0,0)
+            local right = targetHRP.CFrame.RightVector
+            local look = targetHRP.CFrame.LookVector
+            if standPosition == "front" then
+                offset = look * 2
+            elseif standPosition == "behind" or standPosition == "back" then
+                offset = -look * 2
+            elseif standPosition == "left" then
+                offset = -right * 2
+            elseif standPosition == "right" then
+                offset = right * 2
+            else
+                offset = look * 2
+            end
+            local basePos = targetHRP.Position + offset + Vector3.new(0, 1.5, 0)
+            local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
+            -- gentle floating animation (up/down) while standing
+            local floatAmp = 0.22
+            local floatFreq = 1.1
+            local yOffset = math.sin(tick() * floatFreq) * floatAmp
+            hrp.CFrame = CFrame.lookAt(basePos + Vector3.new(0, yOffset, 0), lookAt)
         end)
-        wait(0.4 * scaleFactor())
+        wait(0.12 * scaleFactor())
     end
 end
 
@@ -308,14 +381,7 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
             end
         end
 
-        -- go back to safety platform between attempts to avoid being seen and add a delay
-        if safetyPlatform and safetyPlatform.Parent then
-            pcall(function()
-                teleportTo(safetyPlatform.Position + Vector3.new(0, 3, 0))
-            end)
-            wait(0.4 * scaleFactor())
-        end
-        -- avoid rapid searching
+        -- avoid rapid searching; continue searching in-place until delivery complete
         local sd = (type(searchDelay) == "number" and searchDelay) or tonumber(searchDelay) or 2
         wait(sd)
     end
@@ -330,7 +396,21 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
     if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
         local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
         if targetHRP then
-                local frontPos = targetHRP.Position + targetHRP.CFrame.LookVector * 2
+                local right = targetHRP.CFrame.RightVector
+                local look = targetHRP.CFrame.LookVector
+                local offset = Vector3.new(0,0,0)
+                if standPosition == "front" then
+                    offset = look * 2
+                elseif standPosition == "behind" or standPosition == "back" then
+                    offset = -look * 2
+                elseif standPosition == "left" then
+                    offset = -right * 2
+                elseif standPosition == "right" then
+                    offset = right * 2
+                else
+                    offset = look * 2
+                end
+                local frontPos = targetHRP.Position + offset
                 local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
                 local cframe = CFrame.new(frontPos + Vector3.new(0, 1.5, 0), lookAt)
                 teleportToCFrame(cframe)
@@ -460,6 +540,25 @@ SearchSlider:SetValue(searchDelay)
 
 -- Auto-Respawn indicator (always enabled) and monitor
 Tabs.Main:AddToggle("AutoRespawn", { Title = "Auto-Respawn", Description = "Automatically press respawn when DeadFrame appears", Default = true, Disabled = true }):OnChanged(function() end)
+
+-- Stand position input (front/behind/left/right)
+local StandInput = Tabs.Main:AddInput("StandPositionInput", {
+    Title = "Stand Position",
+    Placeholder = "front / behind / left / right",
+    Default = standPosition,
+    Callback = function(Value) end
+})
+
+StandInput:OnChanged(function(Value)
+    local v = (Value or ""):lower()
+    if v == "front" or v == "behind" or v == "back" or v == "left" or v == "right" then
+        if v == "back" then v = "behind" end
+        standPosition = v
+        notifyLocal("Assist", "Stand position set to: " .. standPosition, 3)
+    else
+        notifyLocal("Assist", "Invalid stand position. Use front/behind/left/right.", 4)
+    end
+end)
 
 local function pressDeadFrameButton(deadFrame)
     if not deadFrame then return end
