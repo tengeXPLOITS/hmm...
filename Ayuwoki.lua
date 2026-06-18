@@ -295,7 +295,7 @@ local function followPlayerContinuously(targetPlayer)
             local offset = Vector3.new(0,0,0)
             local right = targetHRP.CFrame.RightVector
             local look = targetHRP.CFrame.LookVector
-            local distance = 3 -- place slightly farther
+            local distance = 6.5 -- increased distance to avoid touching
             if standPosition == "front" then
                 offset = look * distance
             elseif standPosition == "behind" or standPosition == "back" then
@@ -307,17 +307,19 @@ local function followPlayerContinuously(targetPlayer)
             else
                 offset = look * distance
             end
-            local baseY = 1.6
+            local baseY = 1.8
             if standPosition == "behind" or standPosition == "back" then
-                baseY = baseY + 0.6 -- a bit higher when behind
+                baseY = baseY + 0.7 -- higher when behind
             end
             local basePos = targetHRP.Position + offset + Vector3.new(0, baseY, 0)
-            local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
             -- gentle floating animation (up/down)
             local floatAmp = 0.18
             local floatFreq = 0.9
             local yOffset = math.sin(tick() * floatFreq) * floatAmp
-            local desired = CFrame.lookAt(basePos + Vector3.new(0, yOffset, 0), lookAt)
+            local desiredPos = basePos + Vector3.new(0, yOffset, 0)
+            -- orient the bot to match the player's look direction
+            local playerLook = targetHRP.CFrame.LookVector
+            local desired = CFrame.new(desiredPos, desiredPos + playerLook)
             -- stop any humanoid animations to prevent falling/idle animations
             local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
             if hum then
@@ -508,8 +510,8 @@ local function acquireEscobaAndDeliverTo(targetPlayer)
                     offset = look * 2
                 end
                 local frontPos = targetHRP.Position + offset
-                local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
-                local cframe = CFrame.new(frontPos + Vector3.new(0, 1.5, 0), lookAt)
+                local desiredLook = frontPos + targetHRP.CFrame.LookVector
+                local cframe = CFrame.new(frontPos + Vector3.new(0, 1.5, 0), desiredLook)
                 teleportToCFrame(cframe)
                 wait(0.2 * scaleFactor())
 
