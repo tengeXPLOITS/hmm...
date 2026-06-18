@@ -295,7 +295,7 @@ local function followPlayerContinuously(targetPlayer)
             local offset = Vector3.new(0,0,0)
             local right = targetHRP.CFrame.RightVector
             local look = targetHRP.CFrame.LookVector
-            local distance = 6.5 -- increased distance to avoid touching
+            local distance = 5.34 -- increased distance to avoid touching
             if standPosition == "front" then
                 offset = look * distance
             elseif standPosition == "behind" or standPosition == "back" then
