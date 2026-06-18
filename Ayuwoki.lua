@@ -287,8 +287,8 @@ local function followPlayerContinuously(targetPlayer)
     if not hrp then return end
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return end
-    while botActive and targetPlayer and targetPlayer.Character and targetHRP.Parent do
-        if not botHasEscoba() then break end
+    while (botActive or standMode) and targetPlayer and targetPlayer.Character and targetHRP.Parent do
+        if (not standMode) and (not botHasEscoba()) then break end
         pcall(function()
             local offset = Vector3.new(0,0,0)
             local right = targetHRP.CFrame.RightVector
@@ -313,6 +313,49 @@ local function followPlayerContinuously(targetPlayer)
             hrp.CFrame = CFrame.lookAt(basePos + Vector3.new(0, yOffset, 0), lookAt)
         end)
         wait(0.12 * scaleFactor())
+    end
+end
+
+local function detachChatCommands()
+    if chatConn then
+        pcall(function() chatConn:Disconnect() end)
+        chatConn = nil
+    end
+end
+
+local function onPlayerChat(player, message)
+    if not whitelistedPlayer or player ~= whitelistedPlayer then return end
+    local msg = (message or ""):lower():gsub("^%s+","")
+    if msg:match("^%.stand") then
+        standMode = true
+        if followCoroutine and coroutine.status(followCoroutine) ~= "dead" then
+            -- already following
+        else
+            followCoroutine = coroutine.create(function() followPlayerContinuously(whitelistedPlayer) end)
+            coroutine.resume(followCoroutine)
+        end
+        notifyLocal("Assist", "Stand mode enabled.", 4)
+    elseif msg:match("^%.disablehelpmode") then
+        botActive = false
+        handToFired = false
+        toolEquipped = false
+        standMode = false
+        notifyLocal("Assist", "Help mode disabled.", 4)
+    elseif msg:match("^%.starthelpmode") then
+        if not botActive then
+            spawn(function() acquireEscobaAndDeliverTo(whitelistedPlayer) end)
+        end
+        notifyLocal("Assist", "Help mode started.", 4)
+    end
+end
+
+local function attachChatCommands(pl)
+    detachChatCommands()
+    if not pl then return end
+    if pl.Chatted then
+        chatConn = pl.Chatted:Connect(function(msg)
+            pcall(function() onPlayerChat(pl, msg) end)
+        end)
     end
 end
 
@@ -510,8 +553,16 @@ Tabs.Main:AddButton({
         whitelistedPlayer = pl
         notifyLocal("Whitelist", "Whitelisted: " .. pl.Name, 5)
         pcall(function()
-            sendChatMessage("[Assist] " .. pl.Name .. ": Assistance mode enabled. A BOT will attempt to help you.")
+            local cmds = ".stand (bot follows you), .starthelpmode, .disablehelpmode"
+            local msg = "[Assist] Commands: " .. cmds
+            if ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") and ReplicatedStorage.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest") then
+                ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer("/w " .. pl.Name .. " " .. msg, "All")
+            else
+                sendChatMessage("[Assist] " .. pl.Name .. ": Assistance mode enabled. Commands: " .. cmds)
+            end
         end)
+        -- attach chat command listener for this whitelisted player
+        pcall(function() attachChatCommands(pl) end)
     end
 })
 
@@ -519,24 +570,8 @@ Tabs.Main:AddToggle("AutoAssist", { Title = "Auto-Assist When Whitelisted", Defa
     Options.AutoAssist.Value = not not Options.AutoAssist.Value
 end)
 
--- Search speed slider
-local SearchSlider = Tabs.Main:AddSlider("SearchSpeed", {
-    Title = "Search Delay",
-    Description = "Seconds between search attempts (lower = faster)",
-    Default = searchDelay,
-    Min = 0.5,
-    Max = 6,
-    Rounding = 0.5,
-    Callback = function(Value)
-        searchDelay = tonumber(Value) or searchDelay
-    end
-})
-
-SearchSlider:OnChanged(function(Value)
-    searchDelay = tonumber(Value) or searchDelay
-end)
-
-SearchSlider:SetValue(searchDelay)
+-- NOTE: fixed search delay (default); slider removed to avoid unreliable fast pickups
+searchDelay = 2
 
 -- Auto-Respawn indicator (always enabled) and monitor
 Tabs.Main:AddToggle("AutoRespawn", { Title = "Auto-Respawn", Description = "Automatically press respawn when DeadFrame appears", Default = true, Disabled = true }):OnChanged(function() end)
@@ -705,6 +740,7 @@ Tabs.Main:AddButton({
         botActive = false
         handToFired = false
         toolEquipped = false
+        standMode = false
         if followCoroutine and coroutine.status(followCoroutine) ~= "dead" then
             -- coroutine will stop due to botActive = false
         end
