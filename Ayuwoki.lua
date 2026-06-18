@@ -33,6 +33,8 @@ local handToFired = false
 local toolEquipped = false
 local searchDelay = 2 -- seconds between search attempts to avoid rapid searching
 local standPosition = "front" -- front/back/left/right
+local standMode = false
+local safetyPlatformMode = false
 
 local _baseSearchDelay = 2
 local function scaleFactor()
@@ -293,26 +295,48 @@ local function followPlayerContinuously(targetPlayer)
             local offset = Vector3.new(0,0,0)
             local right = targetHRP.CFrame.RightVector
             local look = targetHRP.CFrame.LookVector
+            local distance = 3 -- place slightly farther
             if standPosition == "front" then
-                offset = look * 2
+                offset = look * distance
             elseif standPosition == "behind" or standPosition == "back" then
-                offset = -look * 2
+                offset = -look * distance
             elseif standPosition == "left" then
-                offset = -right * 2
+                offset = -right * distance
             elseif standPosition == "right" then
-                offset = right * 2
+                offset = right * distance
             else
-                offset = look * 2
+                offset = look * distance
             end
-            local basePos = targetHRP.Position + offset + Vector3.new(0, 1.5, 0)
+            local baseY = 1.6
+            if standPosition == "behind" or standPosition == "back" then
+                baseY = baseY + 0.6 -- a bit higher when behind
+            end
+            local basePos = targetHRP.Position + offset + Vector3.new(0, baseY, 0)
             local lookAt = targetHRP.Position + Vector3.new(0, 1.5, 0)
-            -- gentle floating animation (up/down) while standing
-            local floatAmp = 0.22
-            local floatFreq = 1.1
+            -- gentle floating animation (up/down)
+            local floatAmp = 0.18
+            local floatFreq = 0.9
             local yOffset = math.sin(tick() * floatFreq) * floatAmp
-            hrp.CFrame = CFrame.lookAt(basePos + Vector3.new(0, yOffset, 0), lookAt)
+            local desired = CFrame.lookAt(basePos + Vector3.new(0, yOffset, 0), lookAt)
+            -- stop any humanoid animations to prevent falling/idle animations
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function()
+                    for _,track in pairs(hum:GetPlayingAnimationTracks()) do
+                        pcall(function() track:Stop() end)
+                    end
+                end)
+            end
+            -- smooth lerp to desired CFrame
+            if hrp and hrp.CFrame then
+                local cur = hrp.CFrame
+                local lerped = cur:Lerp(desired, 0.18)
+                hrp.CFrame = lerped
+            else
+                hrp.CFrame = desired
+            end
         end)
-        wait(0.12 * scaleFactor())
+        wait(0.06)
     end
 end
 
@@ -326,7 +350,19 @@ end
 local function onPlayerChat(player, message)
     if not whitelistedPlayer or player ~= whitelistedPlayer then return end
     local msg = (message or ""):lower():gsub("^%s+","")
+    -- if safetyPlatformMode is active and a different command is used, remove the platform
+    if safetyPlatformMode and not msg:match("^%.safetyplatform") then
+        if safetyPlatform and safetyPlatform.Parent then pcall(function() safetyPlatform:Destroy() end) end
+        safetyPlatform = nil
+        safetyPlatformMode = false
+    end
     if msg:match("^%.stand") then
+        -- if safetyPlatformMode active, remove it when other commands are used
+        if safetyPlatformMode then
+            if safetyPlatform and safetyPlatform.Parent then pcall(function() safetyPlatform:Destroy() end) end
+            safetyPlatform = nil
+            safetyPlatformMode = false
+        end
         standMode = true
         if followCoroutine and coroutine.status(followCoroutine) ~= "dead" then
             -- already following
@@ -346,6 +382,24 @@ local function onPlayerChat(player, message)
             spawn(function() acquireEscobaAndDeliverTo(whitelistedPlayer) end)
         end
         notifyLocal("Assist", "Help mode started.", 4)
+    elseif msg:match("^%.nostand") then
+        standMode = false
+        notifyLocal("Assist", "Stand mode disabled.", 4)
+    elseif msg:match("^%.safetyplatform") then
+        -- create and teleport to safety platform; enter safetyPlatformMode
+        if safetyPlatform and safetyPlatform.Parent then
+            pcall(function() safetyPlatform:Destroy() end)
+            safetyPlatform = nil
+        end
+        createSafetyPlatform(120)
+        if safetyPlatform and safetyPlatform.Parent then
+            pcall(function() teleportTo(safetyPlatform.Position + Vector3.new(0,3,0)) end)
+        end
+        safetyPlatformMode = true
+        -- when safetyPlatformMode is active, stop other modes
+        botActive = false
+        standMode = false
+        notifyLocal("Assist", "Safety platform deployed.", 4)
     end
 end
 
@@ -563,6 +617,20 @@ Tabs.Main:AddButton({
         end)
         -- attach chat command listener for this whitelisted player
         pcall(function() attachChatCommands(pl) end)
+        -- attempt whisper (retry) then fallback to public message
+        pcall(function()
+            local cmds = ".stand (bot follows you), .starthelpmode, .disablehelpmode, .nostand, .safetyplatform"
+            local msg = "[Assist] Commands: " .. cmds
+            local ok, _ = pcall(function()
+                if ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents") and ReplicatedStorage.DefaultChatSystemChatEvents:FindFirstChild("SayMessageRequest") then
+                    ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer("/w " .. pl.Name .. " " .. msg, "All")
+                end
+            end)
+            wait(0.2)
+            if not ok then
+                sendChatMessage("[Assist] " .. pl.Name .. ": Assistance mode enabled. Commands: " .. cmds)
+            end
+        end)
     end
 })
 
